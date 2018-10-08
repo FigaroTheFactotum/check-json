@@ -1,0 +1,231 @@
+#!/usr/bin/python3
+from collections import namedtuple
+import enum
+import subprocess
+import sys
+from tabulate import tabulate
+
+
+@enum.unique
+class ExitCode(enum.Enum):
+
+    OK = 0
+    FAILED = 1
+
+
+Result = namedtuple("Result", ["exit_code", "data"])
+
+TestCase = namedtuple(
+    "TestCase", ["title", "data", "rfc", "ecma", "json_org"]
+)
+
+
+TEST_CASES = []
+
+
+TEST_CASES.append(
+    TestCase(
+        title="Number as top-level value",
+        data=b"1",
+        rfc=Result(exit_code=ExitCode.OK, data=[b"1"]),
+        ecma=Result(exit_code=ExitCode.OK, data=[b"1"]),
+        json_org=Result(exit_code=ExitCode.FAILED, data=[]),
+    )
+)
+
+
+TEST_CASES.append(
+    TestCase(
+        title="String as top-level value",
+        data=b'"hello"',
+        rfc=Result(exit_code=ExitCode.OK, data=[b'"hello"']),
+        ecma=Result(exit_code=ExitCode.OK, data=[b'"hello"']),
+        json_org=Result(exit_code=ExitCode.FAILED, data=[]),
+    )
+)
+
+
+TEST_CASES.append(
+    TestCase(
+        title="NaN keyword",
+        data=b'{"foo":NaN}',
+        rfc=Result(exit_code=ExitCode.FAILED, data=[]),
+        ecma=Result(exit_code=ExitCode.FAILED, data=[]),
+        json_org=Result(exit_code=ExitCode.FAILED, data=[]),
+    )
+)
+
+
+TEST_CASES.append(
+    TestCase(
+        title="Infinity keyword",
+        data=b'{"foo":Infinity}',
+        rfc=Result(exit_code=ExitCode.FAILED, data=[]),
+        ecma=Result(exit_code=ExitCode.FAILED, data=[]),
+        json_org=Result(exit_code=ExitCode.FAILED, data=[]),
+    )
+)
+
+_PIS = [
+    b'{"pi":3.141592653589793238462643383279502884197169399375105820974945}',
+]
+
+TEST_CASES.append(
+    TestCase(
+        title="Number precision",
+        data=_PIS[0],
+        rfc=Result(exit_code=ExitCode.OK, data=_PIS),
+        ecma=Result(exit_code=ExitCode.OK, data=_PIS),
+        json_org=Result(exit_code=ExitCode.OK, data=_PIS),
+    )
+)
+
+_BIGINTS = [
+    b'{"big":314159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798214808651328230664709384460955058223172535940812848111745028410270193852110555964462294895493038196442881097566593344612847564823378678316527120190914564856692346034861045432664821339360726024914127372458700660631558817488152092096282925409171536436789259036001133053054882046652138414695194151160943305727036575959195309218611738193261179310511854807446237996274956735188575272489122793818301194912983367336244065664308602139494639522473719070217986094370277053921717629317675238467481846766940513200056812714526356082778577134275778960917363717872146844090122495343014654958537105079227968925892354201995611212902196086403441815981362977477130996051870721134999999837297804995105973173281609631859502445945534690830264252230825334468503}',
+]
+
+TEST_CASES.append(
+    TestCase(
+        title="Big integer",
+        data=_BIGINTS[0],
+        rfc=Result(exit_code=ExitCode.OK, data=_BIGINTS),
+        ecma=Result(exit_code=ExitCode.OK, data=_BIGINTS),
+        json_org=Result(exit_code=ExitCode.OK, data=_BIGINTS),
+    )
+)
+
+_HEX = [
+    b'{"hex":0xff}',
+]
+
+TEST_CASES.append(
+    TestCase(
+        title="Hexadecimal notation",
+        data=_HEX[0],
+        rfc=Result(exit_code=ExitCode.FAILED, data=[]),
+        ecma=Result(exit_code=ExitCode.FAILED, data=[]),
+        json_org=Result(exit_code=ExitCode.FAILED, data=[]),
+    )
+)
+
+_OCT = [
+    b'{"oct":0777}',
+]
+
+TEST_CASES.append(
+    TestCase(
+        title="Octal notation",
+        data=_OCT[0],
+        rfc=Result(exit_code=ExitCode.FAILED, data=[]),
+        ecma=Result(exit_code=ExitCode.FAILED, data=[]),
+        json_org=Result(exit_code=ExitCode.FAILED, data=[]),
+    )
+)
+
+_BIN = [
+    b'{"bin":0b0110}',
+]
+
+TEST_CASES.append(
+    TestCase(
+        title="Binary notation",
+        data=_BIN[0],
+        rfc=Result(exit_code=ExitCode.FAILED, data=[]),
+        ecma=Result(exit_code=ExitCode.FAILED, data=[]),
+        json_org=Result(exit_code=ExitCode.FAILED, data=[]),
+    )
+)
+
+_DUPE_KEEP_LAST = [
+    b'{"aaa":2}',
+]
+
+TEST_CASES.append(
+    TestCase(
+        title="Duplicate members: keep last",
+        data=b'{"aaa": 1, "aaa": 2}',
+        rfc=Result(exit_code=ExitCode.OK, data=_DUPE_KEEP_LAST),
+        ecma=Result(exit_code=ExitCode.OK, data=_DUPE_KEEP_LAST),
+        json_org=Result(exit_code=ExitCode.OK, data=_DUPE_KEEP_LAST),
+    )
+)
+
+_DUPE_KEEP_FIRST = [
+    b'{"aaa":1}',
+]
+
+TEST_CASES.append(
+    TestCase(
+        title="Duplicate members: keep first",
+        data=b'{"aaa": 1, "aaa": 2}',
+        rfc=Result(exit_code=ExitCode.OK, data=_DUPE_KEEP_FIRST),
+        ecma=Result(exit_code=ExitCode.OK, data=_DUPE_KEEP_FIRST),
+        json_org=Result(exit_code=ExitCode.OK, data=_DUPE_KEEP_FIRST),
+    )
+)
+
+
+def check_result(expected, exit_code, out, err):
+    if expected.exit_code == ExitCode.OK:
+        if exit_code == 0 and out in expected.data:
+            return "OK"
+
+        else:
+            return f"Invalid"
+    else:  # ExitCode.FAILED
+        if exit_code != 0:
+            return "OK"
+
+        else:
+            return f"Error"
+
+
+def run_tests(args):
+    for test_case in TEST_CASES:
+        print(f"Running test: {test_case.title}")
+
+        cmd = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+        out, err = cmd.communicate(test_case.data)
+        exit_code = cmd.returncode
+
+        out = out.strip().replace(b' ', b'').replace(b'\n', b'')
+
+        yield [
+            test_case.title,
+            #  test_case.data,
+            out,
+            "Error" if exit_code != 0 else out,
+            # check rfc8259 compatibility
+            check_result(test_case.rfc, exit_code, out, err),
+            # check ecma-404 compatibility
+            check_result(test_case.ecma, exit_code, out, err),
+            # check json.org compatibility
+            check_result(test_case.json_org, exit_code, out, err),
+        ]
+
+
+def main():
+    test_path = sys.argv[1:]
+
+    res = list(run_tests(test_path))
+
+    print(
+        tabulate(
+            res,
+            headers=[
+                "Test",
+                "Input",
+                "Output",
+                "Error",
+                "RFC 8259",
+                "ECMA-404",
+                "JSON.org",
+            ],
+            tablefmt="pipe"
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()
